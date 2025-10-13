@@ -2,28 +2,16 @@ import 'dotenv/config';
 import boltPkg from '@slack/bolt';
 import { google as GoogleAPI } from 'googleapis';
 
-const { App, ExpressReceiver } = boltPkg;
+const { App } = boltPkg;
 
 /* =========================
-   Slack HTTP Receiver
+   Slack Socket Mode App
 ========================= */
-const receiver = new ExpressReceiver({
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  endpoints: {
-    events: '/slack/events',
-    commands: '/slack/command',
-    interactive: '/slack/interactive',
-  },
-});
-receiver.app.get('/', (_req, res) => res.status(200).type('text/plain').send('OK'));
-receiver.app.get('/health', (_req, res) => res.status(200).type('text/plain').send('OK'));
-receiver.app.get('/version', (_req, res) =>
-  res.status(200).json({ SHOPIFY_API_VERSION: process.env.SHOPIFY_API_VERSION || '2025-10' })
-);
-
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  receiver,
+  token: process.env.SLACK_BOT_TOKEN,   // xoxb-...
+  appToken: process.env.SLACK_APP_TOKEN, // xapp-... (App-Level Token with connections:write)
+  socketMode: true,
+  processBeforeResponse: true
 });
 
 /* =========================
@@ -32,8 +20,8 @@ const app = new App({
 const WATCH_CHANNEL =
   process.env.FORWARD_CHANNEL_ID || process.env.ORDER_EMAIL_CHANNEL_ID || '';
 
-const SHOPIFY_DOMAIN = process.env.SHOPIFY_DOMAIN;          // e.g. carismodesign.myshopify.com
-const SHOPIFY_TOKEN  = process.env.SHOPIFY_ADMIN_TOKEN;
+const SHOPIFY_DOMAIN  = process.env.SHOPIFY_DOMAIN;
+const SHOPIFY_TOKEN   = process.env.SHOPIFY_ADMIN_TOKEN;
 const SHOPIFY_VERSION = process.env.SHOPIFY_API_VERSION || '2025-10';
 
 const TRELLO_KEY   = process.env.TRELLO_KEY;
@@ -44,12 +32,14 @@ const TRELLO_BOARD_NAME   = process.env.TRELLO_BOARD_NAME || 'Carismo Design';
 const TRELLO_LIST_NAME    = process.env.TRELLO_LIST_NAME  || 'Nick To-Do';
 
 /* Gmail config */
-const SHOP_FROM_EMAIL = (process.env.SHOP_FROM_EMAIL || 'shop@carismodesign.com').toLowerCase();
-const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const SHOP_FROM_EMAIL     = (process.env.SHOP_FROM_EMAIL || 'shop@carismodesign.com').toLowerCase();
+const GMAIL_CLIENT_ID     = process.env.GMAIL_CLIENT_ID;
 const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
-const GMAIL_REDIRECT_URI = process.env.GMAIL_REDIRECT_URI;
+const GMAIL_REDIRECT_URI  = process.env.GMAIL_REDIRECT_URI;
 const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
-const OAUTH_DISABLED = String(process.env.DISABLE_OAUTH_INIT || '').toLowerCase() === 'true';
+
+/* Disable OAuth HTTP init/callback on the VPS */
+const OAUTH_DISABLED = true;
 
 /* =========================
    Optional Gmail OAuth bootstrapping
@@ -1335,9 +1325,8 @@ const latest = await gmailGetLatestInboundInThread(found.threadId);
    Start
 ========================= */
 (async () => {
-  const port = process.env.PORT || 3000;
-  await app.start(port);
-  console.log(`✅ email-actions bot running on port ${port}`);
+  await app.start(); // ← no port in Socket Mode
+  console.log('✅ email-actions bot running (Socket Mode)');
   console.log('🔧 Watching channel ID:', WATCH_CHANNEL || '(not set)');
 
   try {

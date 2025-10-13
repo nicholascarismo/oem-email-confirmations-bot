@@ -1,0 +1,53 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add VPS to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Rsync to VPS
+        env:
+          HOST: ${{ secrets.DROPLET_HOST }}
+          USER: ${{ secrets.DROPLET_USER }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+        run: |
+          rsync -az --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            ./ $USER@$HOST:$REMOTE_DIR/
+
+      - name: Install deps & reload with PM2
+        env:
+          HOST: ${{ secrets.DROPLET_HOST }}
+          USER: ${{ secrets.DROPLET_USER }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+        run: |
+          ssh $USER@$HOST << 'EOF'
+          set -e
+          cd "$REMOTE_DIR"
+          # Load shared env exports
+          source ~/.profile
+          npm ci
+          # Start if not running; otherwise reload
+          NAME=$(basename "$REMOTE_DIR")
+          pm2 describe "$NAME" >/dev/null 2>&1 || pm2 start index.js --name "$NAME"
+          pm2 reload "$NAME"
+          pm2 save
+          EOF
