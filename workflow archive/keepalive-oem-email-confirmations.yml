@@ -1,0 +1,66 @@
+name: Keep Render Warm (oem-email-confirmations)
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # every 10 minutes
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive-oem-email-confirmations
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Define URL & jitter
+        id: defs
+        shell: bash
+        run: |
+          echo "BASE=https://oem-email-confirmations.onrender.com" >> "$GITHUB_OUTPUT"
+          echo "TS=$(date +%s)" >> "$GITHUB_OUTPUT"
+          echo "JITTER=$((RANDOM % 12))" >> "$GITHUB_OUTPUT"
+
+      - name: Jitter sleep (avoid herd)
+        run: sleep ${{ steps.defs.outputs.JITTER }}
+
+      - name: Ping /health (GET, robust retries)
+        shell: bash
+        run: |
+          set -e
+          BASE="${{ steps.defs.outputs.BASE }}"
+          TS="${{ steps.defs.outputs.TS }}"
+          for i in $(seq 1 8); do
+            echo "Attempt $i..."
+            CODE=$(curl -4 -sS \
+              --location \
+              --connect-timeout 20 --max-time 60 \
+              -o /dev/null -w "%{http_code}" \
+              "$BASE/health?ts=$TS&i=$i") || true
+            echo "HTTP ${CODE:-<none>}"
+            [ "$CODE" = "200" ] && { echo "✅ Warm OK"; exit 0; }
+            sleep $((8 + 4*i))   # 12,16,20,… seconds
+          done
+          echo "❌ Could not reach $BASE/health with HTTP 200 after retries"
+          exit 1
+
+      - name: Optional /version sanity (non-fatal)
+        continue-on-error: true
+        run: |
+          BASE="${{ steps.defs.outputs.BASE }}"
+          TS=$(date +%s)
+          curl -4 -sS --connect-timeout 6 --max-time 8 "$BASE/version?ts=$TS" || true
+
+      - name: Notify Slack on failure (optional)
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "$WEBHOOK" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data "{\"text\":\"❌ *Keep Render Warm (oem-email-confirmations)* failed.\nRepo: ${{ github.repository }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+              "$WEBHOOK"
+          else
+            echo "No SLACK_WEBHOOK_URL secret set; skipping Slack notify."
+          fi
