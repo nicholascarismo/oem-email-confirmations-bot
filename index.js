@@ -41,46 +41,6 @@ const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
 /* Disable OAuth HTTP init/callback on the VPS */
 const OAUTH_DISABLED = true;
 
-/* =========================
-   Optional Gmail OAuth bootstrapping
-========================= */
-receiver.app.get('/oauth/google/init', (req, res) => {
-  if (OAUTH_DISABLED) return res.status(403).send('Disabled');
-  try {
-    const oauth2Client = mkOAuthClient();
-    const url = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: [
-        'https://www.googleapis.com/auth/gmail.send',
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/gmail.modify'
-      ]
-    });
-    res.redirect(url);
-  } catch (e) {
-    res.status(500).send('OAuth init error: ' + e.message);
-  }
-});
-
-receiver.app.get('/oauth/google/callback', async (req, res) => {
-  if (OAUTH_DISABLED) return res.status(403).send('Disabled');
-  const code = req.query.code;
-  try {
-    const oauth2Client = mkOAuthClient();
-    const { tokens } = await oauth2Client.getToken(code);
-    console.log('🌱 Got tokens from Google:', JSON.stringify(Object.keys(tokens)));
-    if (tokens.refresh_token) {
-      console.log('🌱 Got refresh token — set GMAIL_REFRESH_TOKEN=' + tokens.refresh_token + ' in Render env.');
-      res.status(200).send('Success. Check logs for refresh token. Add it to Render env as GMAIL_REFRESH_TOKEN, then redeploy.');
-    } else {
-      res.status(200).send('No refresh_token returned (Google may have issued one previously). Try removing the app from your Google Account access and retry with prompt=consent.');
-    }
-  } catch (e) {
-    console.error('OAuth callback error', e);
-    res.status(500).send('OAuth callback error: ' + e.message);
-  }
-});
 
 /* =========================
    Constants
