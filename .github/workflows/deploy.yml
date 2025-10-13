@@ -41,13 +41,28 @@ jobs:
         run: |
           ssh $USER@$HOST << 'EOF'
           set -e
-          cd "$REMOTE_DIR"
-          # Load shared env exports
-          source ~/.profile
-          npm ci
+          echo "REMOTE_DIR=${REMOTE_DIR}"
+          cd "${REMOTE_DIR}"
+          echo "PWD=$(pwd)"
+          echo "Listing files:"
+          ls -la
+
+          # Show Node/npm versions on the droplet for sanity
+          node -v || true
+          npm -v || true
+
+          # Prefer ci when lockfile exists, otherwise install
+          if [ -f package-lock.json ]; then
+            echo "Lockfile present -> npm ci"
+            npm ci
+          else
+            echo "No lockfile -> npm install"
+            npm install
+          fi
+
           # Start if not running; otherwise reload
-          NAME=$(basename "$REMOTE_DIR")
-          pm2 describe "$NAME" >/dev/null 2>&1 || pm2 start index.js --name "$NAME"
-          pm2 reload "$NAME"
+          PROC_NAME="$(basename "${REMOTE_DIR}")"
+          pm2 describe "$PROC_NAME" >/dev/null 2>&1 || pm2 start index.js --name "$PROC_NAME"
+          pm2 reload "$PROC_NAME"
           pm2 save
           EOF
