@@ -1103,10 +1103,38 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client }) => {
           submit: { type: 'plain_text', text: 'Review' },
           close: { type: 'plain_text', text: 'Cancel' },
           blocks: [
-            { type: 'input',
+            {
+              type: 'input',
+              block_id: 'email_block',
+              label: { type: 'plain_text', text: 'Customer email (optional)' },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'email',
+                placeholder: { type: 'plain_text', text: 'e.g. customer@example.com' }
+              },
+              optional: true
+            },
+            {
+              type: 'input',
+              block_id: 'subj_block',
+              label: { type: 'plain_text', text: 'Subject (optional)' },
+              element: {
+                type: 'plain_text_input',
+                action_id: 'subject',
+                initial_value: (md.subjectGuess || '')
+              },
+              optional: true
+            },
+            {
+              type: 'input',
               block_id: 'body_block',
               label: { type: 'plain_text', text: 'Message to customer' },
-              element: { type: 'plain_text_input', action_id: 'body', multiline: true, placeholder: { type: 'plain_text', text: 'Type your reply…' } }
+              element: {
+                type: 'plain_text_input',
+                action_id: 'body',
+                multiline: true,
+                placeholder: { type: 'plain_text', text: 'Type your reply…' }
+              }
             }
           ],
           private_metadata: JSON.stringify(md)
@@ -1146,6 +1174,8 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client }) => {
 app.view('reply_body_modal', async ({ ack, body, view, client }) => {
   const md = JSON.parse(view.private_metadata || '{}');
   const replyBody = view.state.values?.body_block?.body?.value?.trim();
+  const email = view.state.values?.email_block?.email?.value?.trim();
+  const subjectLine = view.state.values?.subj_block?.subject?.value?.trim();
 
   if (!replyBody) {
     await ack({ response_action: 'errors', errors: { body_block: 'Please enter a message' } });
@@ -1160,11 +1190,13 @@ app.view('reply_body_modal', async ({ ack, body, view, client }) => {
       title: { type: 'plain_text', text: 'Review Reply' },
       submit: { type: 'plain_text', text: 'Send' },
       close: { type: 'plain_text', text: 'Back' },
-      blocks: [
-        { type: 'section', text: { type: 'mrkdwn', text: '*Your message:*' } },
-        { type: 'section', text: { type: 'mrkdwn', text: '```' + replyBody + '```' } }
-      ],
-      private_metadata: JSON.stringify({ ...md, replyBody })
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${email || '_(auto-detect at send time_)'}` } },
+          { type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${subjectLine || (md.subjectGuess || '_(will be derived_)')}` } },
+          { type: 'section', text: { type: 'mrkdwn', text: '*Your message:*' } },
+          { type: 'section', text: { type: 'mrkdwn', text: '```' + replyBody + '```' } }
+        ],
+            private_metadata: JSON.stringify({ ...md, replyBody, email, subjectLine })
     }
   });
 });
@@ -1174,7 +1206,7 @@ app.view('reply_review_modal', async ({ ack, body, view, client, logger }) => {
   await ack();
 
   const md = JSON.parse(view.private_metadata || '{}');
-  const { channel, thread_ts, orderName, subjectGuess, replyBody } = md;
+  const { channel, thread_ts, orderName, subjectGuess, replyBody, email: overrideEmail, subjectLine: overrideSubject } = md;
 
   try {
     const found = await gmailFindThread({ subjectGuess, orderName });
@@ -1187,11 +1219,13 @@ const anchored = await gmailPickCustomerFromAnchoredHeader(found.threadId);
 const latest = anchored?.rich || await gmailGetLatestInboundInThread(found.threadId);
 
 // Final reply-to address (anchored wins)
-const replyTo = anchored?.email || latest.replyAddress;
-if (!replyTo) throw new Error('Could not determine customer email address (Reply-To/From missing)');
+const replyTo = (overrideEmail && overrideEmail.length > 0 ? overrideEmail : (anchored?.email || latest.replyAddress));
+if (!replyTo) throw new Error('Could not determine customer email address (Reply-To/From missing) — try entering it in the modal.');
 
-    const subjectBase = latest.subject || (subjectGuess || `Your Carismo Order ${orderName}`);
-    const subject = subjectBase.startsWith('Re:') ? subjectBase : `Re: ${subjectBase}`;
+    const subjectBase = (overrideSubject && overrideSubject.length > 0)
+  ? overrideSubject
+  : (latest.subject || (subjectGuess || `Your Carismo Order ${orderName}`));
+const subject = subjectBase.startsWith('Re:') ? subjectBase : `Re: ${subjectBase}`;
 
     // Build plain + HTML with quoted original HTML to preserve formatting
     const htmlReply = [

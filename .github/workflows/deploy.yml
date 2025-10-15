@@ -23,7 +23,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p 22 ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Create .env from ENV_FILE secret (in workspace)
+      - name: Create .env from ENV_FILE
         run: |
           printf "%s" "${{ secrets.ENV_FILE }}" > .env
 
