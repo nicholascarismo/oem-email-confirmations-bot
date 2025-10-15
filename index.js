@@ -1084,7 +1084,7 @@ app.action('reply_forward', async ({ ack, body, client }) => {
 });
 
 /* Choose Reply or Forward -> next modal */
-app.view('choose_reply_or_forward', async ({ ack, body, view, client }) => {
+app.view('choose_reply_or_forward', async ({ ack, body, view, client, logger }) => {
   const md = JSON.parse(view.private_metadata || '{}');
   const choice = view.state.values?.choice_block?.choice?.selected_option?.value;
 
@@ -1093,80 +1093,88 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client }) => {
     return;
   }
 
+  // If replying, resolve the customer email + subject BEFORE showing the body input.
+  if (choice === 'reply') {
+    const { orderName, subjectGuess } = md;
+
+    let resolvedTo = '';
+    let resolvedSubject = '';
+    let latest = null;
+
+    try {
+      const found = await gmailFindThread({ subjectGuess, orderName });
+      if (found) {
+        const anchored = await gmailPickCustomerFromAnchoredHeader(found.threadId);
+        latest = anchored?.rich || await gmailGetLatestInboundInThread(found.threadId);
+        resolvedTo = anchored?.email || latest?.replyAddress || '';
+        const baseSub = (latest?.subject || subjectGuess || `Your Carismo Order ${orderName}`) || '';
+        resolvedSubject = baseSub.startsWith('Re:') ? baseSub : `Re: ${baseSub}`;
+      }
+    } catch (e) {
+      logger?.error?.('pre-resolve reply info failed', e);
+    }
+
+    await ack({
+      response_action: 'update',
+      view: {
+        type: 'modal',
+        callback_id: 'reply_body_modal',
+        title: { type: 'plain_text', text: 'Reply to Customer' },
+        submit: { type: 'plain_text', text: 'Review' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${resolvedTo || '_(will auto-detect at send time_)'}` } },
+          { type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${resolvedSubject || (subjectGuess || '_(will be derived_)')}` } },
+          {
+            type: 'input',
+            block_id: 'body_block',
+            label: { type: 'plain_text', text: 'Message to customer' },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'body',
+              multiline: true,
+              placeholder: { type: 'plain_text', text: 'Type your reply…' }
+            }
+          }
+        ],
+        // Carry resolved info forward for the review + send steps
+        private_metadata: JSON.stringify({ ...md, resolvedTo, resolvedSubject })
+      }
+    });
+    return;
+  }
+
+  // Forward flow unchanged
   await ack({
     response_action: 'update',
-    view: choice === 'reply'
-      ? {
-          type: 'modal',
-          callback_id: 'reply_body_modal',
-          title: { type: 'plain_text', text: 'Reply to Customer' },
-          submit: { type: 'plain_text', text: 'Review' },
-          close: { type: 'plain_text', text: 'Cancel' },
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'email_block',
-              label: { type: 'plain_text', text: 'Customer email (optional)' },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'email',
-                placeholder: { type: 'plain_text', text: 'e.g. customer@example.com' }
-              },
-              optional: true
-            },
-            {
-              type: 'input',
-              block_id: 'subj_block',
-              label: { type: 'plain_text', text: 'Subject (optional)' },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'subject',
-                initial_value: (md.subjectGuess || '')
-              },
-              optional: true
-            },
-            {
-              type: 'input',
-              block_id: 'body_block',
-              label: { type: 'plain_text', text: 'Message to customer' },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'body',
-                multiline: true,
-                placeholder: { type: 'plain_text', text: 'Type your reply…' }
-              }
-            }
-          ],
-          private_metadata: JSON.stringify(md)
+    view: {
+      type: 'modal',
+      callback_id: 'forward_pick_modal',
+      title: { type: 'plain_text', text: 'Forward to Team' },
+      submit: { type: 'plain_text', text: 'Review' },
+      close: { type: 'plain_text', text: 'Cancel' },
+      blocks: [
+        {
+          type: 'input',
+          block_id: 'to_block',
+          label: { type: 'plain_text', text: 'Select recipients' },
+          element: {
+            type: 'multi_static_select',
+            action_id: 'to',
+            options: [
+              'kenny@carismodesign.com',
+              'kevinl@carismodesign.com',
+              'irish@carismodesign.com',
+              'k@carismodesign.com',
+              'shop@carismodesign.com',
+              'nicholas@carismodesign.com',
+            ].map(e => ({ text: { type: 'plain_text', text: e }, value: e })),
+            placeholder: { type: 'plain_text', text: 'Pick one or more' }
+          }
         }
-      : {
-          type: 'modal',
-          callback_id: 'forward_pick_modal',
-          title: { type: 'plain_text', text: 'Forward to Team' },
-          submit: { type: 'plain_text', text: 'Review' },
-          close: { type: 'plain_text', text: 'Cancel' },
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'to_block',
-              label: { type: 'plain_text', text: 'Select recipients' },
-              element: {
-                type: 'multi_static_select',
-                action_id: 'to',
-                options: [
-                  'kenny@carismodesign.com',
-                  'kevinl@carismodesign.com',
-                  'irish@carismodesign.com',
-                  'k@carismodesign.com',
-                  'shop@carismodesign.com',
-                  'nicholas@carismodesign.com',
-                ].map(e => ({ text: { type: 'plain_text', text: e }, value: e })),
-                placeholder: { type: 'plain_text', text: 'Pick one or more' }
-              }
-            }
-          ],
-          private_metadata: JSON.stringify(md)
-        }
+      ],
+      private_metadata: JSON.stringify(md)
+    }
   });
 });
 
@@ -1174,13 +1182,14 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client }) => {
 app.view('reply_body_modal', async ({ ack, body, view, client }) => {
   const md = JSON.parse(view.private_metadata || '{}');
   const replyBody = view.state.values?.body_block?.body?.value?.trim();
-  const email = view.state.values?.email_block?.email?.value?.trim();
-  const subjectLine = view.state.values?.subj_block?.subject?.value?.trim();
 
   if (!replyBody) {
     await ack({ response_action: 'errors', errors: { body_block: 'Please enter a message' } });
     return;
   }
+
+  const showTo = md.resolvedTo || '_(will auto-detect at send time_)';
+  const showSubject = md.resolvedSubject || (md.subjectGuess || '_(will be derived_)');
 
   await ack({
     response_action: 'update',
@@ -1190,13 +1199,13 @@ app.view('reply_body_modal', async ({ ack, body, view, client }) => {
       title: { type: 'plain_text', text: 'Review Reply' },
       submit: { type: 'plain_text', text: 'Send' },
       close: { type: 'plain_text', text: 'Back' },
-        blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${email || '_(auto-detect at send time_)'}` } },
-          { type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${subjectLine || (md.subjectGuess || '_(will be derived_)')}` } },
-          { type: 'section', text: { type: 'mrkdwn', text: '*Your message:*' } },
-          { type: 'section', text: { type: 'mrkdwn', text: '```' + replyBody + '```' } }
-        ],
-            private_metadata: JSON.stringify({ ...md, replyBody, email, subjectLine })
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${showTo}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${showSubject}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: '*Your message:*' } },
+        { type: 'section', text: { type: 'mrkdwn', text: '```' + replyBody + '```' } }
+      ],
+      private_metadata: JSON.stringify({ ...md, replyBody })
     }
   });
 });
@@ -1206,7 +1215,7 @@ app.view('reply_review_modal', async ({ ack, body, view, client, logger }) => {
   await ack();
 
   const md = JSON.parse(view.private_metadata || '{}');
-  const { channel, thread_ts, orderName, subjectGuess, replyBody, email: overrideEmail, subjectLine: overrideSubject } = md;
+  const { channel, thread_ts, orderName, subjectGuess, replyBody, resolvedTo, resolvedSubject } = md;
 
   try {
     const found = await gmailFindThread({ subjectGuess, orderName });
@@ -1218,14 +1227,12 @@ const anchored = await gmailPickCustomerFromAnchoredHeader(found.threadId);
 // 2) Fallback to "latest inbound not from us"
 const latest = anchored?.rich || await gmailGetLatestInboundInThread(found.threadId);
 
-// Final reply-to address (anchored wins)
-const replyTo = (overrideEmail && overrideEmail.length > 0 ? overrideEmail : (anchored?.email || latest.replyAddress));
-if (!replyTo) throw new Error('Could not determine customer email address (Reply-To/From missing) — try entering it in the modal.');
+// Final reply-to address: prefer resolved, then anchored, then latest
+const replyTo = resolvedTo || anchored?.email || latest.replyAddress;
+if (!replyTo) throw new Error('Could not determine customer email address (Reply-To/From missing).');
 
-    const subjectBase = (overrideSubject && overrideSubject.length > 0)
-  ? overrideSubject
-  : (latest.subject || (subjectGuess || `Your Carismo Order ${orderName}`));
-const subject = subjectBase.startsWith('Re:') ? subjectBase : `Re: ${subjectBase}`;
+    const subjectBase = resolvedSubject || latest.subject || (subjectGuess || `Your Carismo Order ${orderName}`);
+    const subject = subjectBase.startsWith('Re:') ? subjectBase : `Re: ${subjectBase}`;
 
     // Build plain + HTML with quoted original HTML to preserve formatting
     const htmlReply = [
