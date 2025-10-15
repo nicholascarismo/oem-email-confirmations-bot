@@ -5,7 +5,7 @@ import { google as GoogleAPI } from 'googleapis';
 const { App } = boltPkg;
 
 /* =========================
-   Slack Socket Mode App
+   Slack Socket Mode App 
 ========================= */
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,   // xoxb-...
