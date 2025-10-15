@@ -1114,6 +1114,27 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client, logger }) 
       logger?.error?.('pre-resolve reply info failed', e);
     }
 
+// HARD REQUIREMENT: do not proceed unless both are resolved
+if (!resolvedTo || !resolvedSubject) {
+  await ack({
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      callback_id: 'reply_cannot_resolve',
+      title: { type: 'plain_text', text: 'Reply to Customer' },
+      close: { type: 'plain_text', text: 'Close' },
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: '*Cannot determine customer email and subject automatically.*' } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Order:* ${orderName}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Detected subject in Slack:* ${subjectGuess || '(none)'}` } },
+        { type: 'section', text: { type: 'mrkdwn', text: 'Please reply in Gmail for this one (thread could not be located reliably).' } }
+      ],
+      private_metadata: JSON.stringify(md)
+    }
+  });
+  return;
+}
+
     await ack({
       response_action: 'update',
       view: {
@@ -1123,8 +1144,8 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client, logger }) 
         submit: { type: 'plain_text', text: 'Review' },
         close: { type: 'plain_text', text: 'Cancel' },
         blocks: [
-          { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${resolvedTo || '_(will auto-detect at send time_)'}` } },
-          { type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${resolvedSubject || (subjectGuess || '_(will be derived_)')}` } },
+          { type: 'section', text: { type: 'mrkdwn', text: `*To:* ${resolvedTo}` } },
+{ type: 'section', text: { type: 'mrkdwn', text: `*Subject:* ${resolvedSubject}` } },
           {
             type: 'input',
             block_id: 'body_block',
@@ -1183,13 +1204,23 @@ app.view('reply_body_modal', async ({ ack, body, view, client }) => {
   const md = JSON.parse(view.private_metadata || '{}');
   const replyBody = view.state.values?.body_block?.body?.value?.trim();
 
+if (!md.resolvedTo || !md.resolvedSubject) {
+  await ack({
+    response_action: 'errors',
+    errors: {
+      body_block: 'Internal error: recipient/subject not resolved. Close and try again.'
+    }
+  });
+  return;
+}
+
   if (!replyBody) {
     await ack({ response_action: 'errors', errors: { body_block: 'Please enter a message' } });
     return;
   }
 
-  const showTo = md.resolvedTo || '_(will auto-detect at send time_)';
-  const showSubject = md.resolvedSubject || (md.subjectGuess || '_(will be derived_)');
+  const showTo = md.resolvedTo;
+const showSubject = md.resolvedSubject;
 
   await ack({
     response_action: 'update',
