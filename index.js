@@ -300,13 +300,21 @@ function collectEmailHaystacks(event) {
 }
 
 function extractSubjectFromSlackEmail(event) {
+  // 1) Prefer Slack Email file metadata (most reliable)
+  if (Array.isArray(event.files)) {
+    for (const f of event.files) {
+      if (f && f.mode === 'email') {
+        if (f.subject) return String(f.subject).trim();
+        if (f.headers?.subject) return String(f.headers.subject).trim();
+      }
+    }
+  }
+  // 2) Attachment titles / visible text fallback
   const titles = (event.attachments || []).map(a => a.title).filter(Boolean);
   if (titles.length) return titles[0].trim();
   if (event.text) {
     const first = String(event.text).split('\n')[0].trim();
-    if (first.toLowerCase().startsWith('subject:')) {
-      return first.replace(/^[Ss]ubject:\s*/, '').trim();
-    }
+    if (/^subject:/i.test(first)) return first.replace(/^[Ss]ubject:\s*/, '').trim();
     return first;
   }
   return '';
@@ -1046,8 +1054,8 @@ app.action('reply_forward', async ({ ack, body, client }) => {
 
   const channel = body.channel?.id;
   const thread_ts = body.message?.thread_ts || body.message?.ts;
-
-  let orderName = '', subjectGuess = '';
+let orderName = '';
+let subjectGuess = '';
   try {
     const payload = JSON.parse(body.actions?.[0]?.value || '{}');
     orderName = payload.orderName || '';
@@ -1078,7 +1086,7 @@ app.action('reply_forward', async ({ ack, body, client }) => {
           }
         }
       ],
-      private_metadata: JSON.stringify({ channel, thread_ts, orderName, subjectGuess })
+      private_metadata: JSON.stringify({ channel, thread_ts, orderName, subjectGuess }),
     }
   });
 });
