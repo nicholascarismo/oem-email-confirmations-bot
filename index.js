@@ -320,6 +320,54 @@ function extractSubjectFromSlackEmail(event) {
   return '';
 }
 
+// === Slack Email metadata resolver (subject + customer email) ===
+async function resolveEmailMetaFromSlack({ client, channel, root_ts }) {
+  // 1) Pull the root message (where the Email file is attached)
+  const hist = await client.conversations.replies({
+    channel,
+    ts: root_ts,
+    inclusive: true,
+    limit: 1
+  });
+
+  const msgs = hist.messages || [];
+  const root = msgs.find(m => m.ts === root_ts) || msgs[0];
+
+  // 2) Look for Slack Email file on the message
+  const files = Array.isArray(root?.files) ? root.files : [];
+  const emailFile = files.find(f => f.mode === 'email') || null;
+
+  // 3) If not present (edge case), bail early
+  if (!emailFile) {
+    return { subject: '', fromAddress: '' };
+  }
+
+  // 4) Prefer inline fields available on the file (fast path)
+  let subject = emailFile.subject || emailFile.headers?.subject || '';
+  let fromAddress =
+    (emailFile.from && emailFile.from[0]?.address) ||
+    (emailFile.headers?.from && (emailFile.headers.from.match(/<([^>]+)>/)?.[1] || emailFile.headers.from)) ||
+    '';
+
+  // 5) If anything is missing, call files.info as a fallback (rare)
+  if (!subject || !fromAddress) {
+    const info = await client.files.info({ file: emailFile.id });
+    const f = info.file || {};
+    subject = subject || f.subject || f.headers?.subject || '';
+    fromAddress =
+      fromAddress ||
+      (f.from && f.from[0]?.address) ||
+      (f.headers?.from && (f.headers.from.match(/<([^>]+)>/)?.[1] || f.headers.from)) ||
+      '';
+  }
+
+  // Normalize
+  subject = String(subject || '').trim();
+  fromAddress = String(fromAddress || '').trim().toLowerCase();
+
+  return { subject, fromAddress };
+}
+
 // --- Ignore the Daily NeedPhotoNoShip reminder in THIS app ---
 const DAILY_NEEDPHOTO_SUBJECT = /^Daily Reminder to Remove NeedPhotoNoShip Tag and Follow-Up Metafields as Needed$/i;
 function isDailyNeedPhotoReminder(event) {
@@ -1053,14 +1101,20 @@ app.action('reply_forward', async ({ ack, body, client }) => {
   await ack();
 
   const channel = body.channel?.id;
-  const thread_ts = body.message?.thread_ts || body.message?.ts;
-let orderName = '';
-let subjectGuess = '';
+  const thread_ts = body.message?.thread_ts || body.message?.ts; // this is the rootts for the email post (where files live)
+  let orderName = '';
+  let subjectGuess = '';
   try {
     const payload = JSON.parse(body.actions?.[0]?.value || '{}');
     orderName = payload.orderName || '';
     subjectGuess = payload.subjectGuess || '';
   } catch {}
+
+  // Resolve subject & customer email directly from the Slack Email file
+  const meta = await resolveEmailMetaFromSlack({ client, channel, root_ts: thread_ts });
+  const customerEmailGuess = meta.fromAddress || '';
+  // Prefer Slack’s subject if we didn’t already have one
+  subjectGuess = subjectGuess || meta.subject || '';
 
   await client.views.open({
     trigger_id: body.trigger_id,
@@ -1086,7 +1140,7 @@ let subjectGuess = '';
           }
         }
       ],
-      private_metadata: JSON.stringify({ channel, thread_ts, orderName, subjectGuess }),
+      private_metadata: JSON.stringify({ channel, thread_ts, orderName, subjectGuess, customerEmail: customerEmailGuess }),
     }
   });
 });
@@ -1105,8 +1159,8 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client, logger }) 
   if (choice === 'reply') {
     const { orderName, subjectGuess } = md;
 
-    let resolvedTo = '';
-    let resolvedSubject = '';
+    let resolvedTo = md.customerEmail || '';
+    let resolvedSubject = md.subjectGuess || '';
     let latest = null;
 
     try {
@@ -1114,9 +1168,14 @@ app.view('choose_reply_or_forward', async ({ ack, body, view, client, logger }) 
       if (found) {
         const anchored = await gmailPickCustomerFromAnchoredHeader(found.threadId);
         latest = anchored?.rich || await gmailGetLatestInboundInThread(found.threadId);
-        resolvedTo = anchored?.email || latest?.replyAddress || '';
-        const baseSub = (latest?.subject || subjectGuess || `Your Carismo Order ${orderName}`) || '';
-        resolvedSubject = baseSub.startsWith('Re:') ? baseSub : `Re: ${baseSub}`;
+        // Only upgrade if Slack didn’t already give us values
+        if (!resolvedTo) {
+          resolvedTo = anchored?.email || latest?.replyAddress || '';
+        }
+        if (!resolvedSubject) {
+          const baseSub = (latest?.subject || subjectGuess || `Your Carismo Order ${orderName}`) || '';
+          resolvedSubject = baseSub.startsWith('Re:') ? baseSub : `Re: ${baseSub}`;
+        }
       }
     } catch (e) {
       logger?.error?.('pre-resolve reply info failed', e);
