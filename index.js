@@ -265,6 +265,8 @@ async function prependOrderNote(orderId, newLine) {
   return res?.orderUpdate?.order?.note || '';
 }
 
+function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
 
 // ---------- Shopify file upload pipeline (Gmail attachments -> Shopify Files) ----------
 
@@ -315,11 +317,11 @@ async function shopifyFilesCreateFromStaged(stagedTargets /* array from stagedUp
 }
 
 /** Upsert order metafield custom.reference_images (type=list.file_reference) with added file IDs */
-async function addFilesToOrderReferenceImages(order /* node from ORDER_LOOKUP_GQL */, newFileIds /* array of GIDs */) {
+async function addFilesToOrderReferenceImages(order, newFileIds) {
   if (!newFileIds?.length) return;
 
   const existing = order?.referenceImagesMf?.references?.nodes || [];
-  const existingIds = existing.map(n => n.id);
+  const existingIds = existing.map(n => n.id).filter(Boolean);
   const merged = Array.from(new Set([...existingIds, ...newFileIds]));
 
   const mfInput = {
@@ -330,9 +332,24 @@ async function addFilesToOrderReferenceImages(order /* node from ORDER_LOOKUP_GQ
     references: merged.map(id => ({ id })),
   };
 
-  const setRes = await shopifyGQL(METAFIELDS_SET_GQL, { metafields: [mfInput] });
-  const errs = setRes?.metafieldsSet?.userErrors || [];
-  if (errs.length) throw new Error(`metafieldsSet(list.file_reference) errors: ${JSON.stringify(errs)}`);
+  // Retry a few times to ride out Files propagation
+  const MAX_TRIES = 5;
+  const DELAY_MS  = 1500;
+
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+    try {
+      const setRes = await shopifyGQL(METAFIELDS_SET_GQL, { metafields: [mfInput] });
+      const errs = setRes?.metafieldsSet?.userErrors || [];
+      if (!errs.length) return; // success
+      // Some stores briefly report “invalid reference” until the File is ready; retry.
+      lastErr = new Error(`metafieldsSet errors (attempt ${attempt}): ${JSON.stringify(errs)}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    await sleep(DELAY_MS);
+  }
+  throw lastErr || new Error('metafieldsSet failed after retries');
 }
 
 /** End-to-end: take a Gmail message, pull image attachments, upload to Shopify, return {uploadedCount, fileIds} */
@@ -352,6 +369,7 @@ async function uploadEmailImagesToOrderMetafield({ latestMessage /* from gmailGe
 
   // 3) create Files from staged resources
   const fileIds = await shopifyFilesCreateFromStaged(stagedTargets);
+await sleep(1500); // give Files a moment to be referenceable
 
   // 4) attach to order metafield list
   await addFilesToOrderReferenceImages(order, fileIds);
@@ -1179,6 +1197,7 @@ try {
   }
 } catch (attachErr) {
   logger?.error?.('reference_images attach failed', attachErr);
+await client.chat.postMessage({ channel, thread_ts, text: `⚠️ Could not attach reference images this time: ${attachErr.message}` });
   // Non-fatal: we still proceed with the rest of the good_clear flow
 }
 
