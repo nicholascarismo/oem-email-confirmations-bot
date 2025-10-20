@@ -99,13 +99,19 @@ const ORDER_LOOKUP_GQL = `
           needsFollowUpMf: metafield(namespace: "custom", key: "_nc_needs_follow_up_") { id value }
           followUpNotesMf: metafield(namespace: "custom", key: "follow_up_notes") { id value }
           referenceImagesMf: metafield(namespace: "custom", key: "reference_images") {
-            id
-            type
-            # For list.file_reference, references.nodes returns File union: MediaImage | GenericFile, both have id
-            references(first: 100) {
-              nodes { __typename id }
-            }
-          }
+  id
+  type
+  references(first: 100) {
+    nodes {
+      __typename
+      ... on MediaImage { id }
+      ... on GenericFile { id }
+      # add more if your store ever uses them:
+      # ... on Video { id }
+      # ... on ExternalVideo { id }
+    }
+  }
+}
         }
       }
     }
