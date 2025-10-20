@@ -120,11 +120,11 @@ const ORDER_LOOKUP_GQL = `
 
 const METAFIELDS_SET_GQL = `
   mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-    metafieldsSet(metafields: $metafields) {
-      metafields { key namespace value }
-      userErrors { field message }
-    }
+  metafieldsSet(metafields: $metafields) {
+    metafields { id key namespace type value }
+    userErrors { field message }
   }
+}
 `;
 
 /* ✅ FIX: use plural metafieldsDelete API */
@@ -324,12 +324,13 @@ async function addFilesToOrderReferenceImages(order, newFileIds) {
   const existingIds = existing.map(n => n.id).filter(Boolean);
   const merged = Array.from(new Set([...existingIds, ...newFileIds]));
 
-  const mfInput = {
+    const mfInput = {
     ownerId: order.id,
     namespace: 'custom',
     key: 'reference_images',
     type: 'list.file_reference',
-    references: merged.map(id => ({ id })),
+    // IMPORTANT: value must be a JSON string of the array of GIDs
+    value: JSON.stringify(merged),
   };
 
   // Retry a few times to ride out Files propagation
