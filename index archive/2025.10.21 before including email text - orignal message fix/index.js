@@ -826,20 +826,16 @@ function extractCustomerTopText(raw) {
   let t = String(raw || '');
   if (!t) return '';
 
-  // Normalize newlines and Unicode dashes (clients use em/en dashes in separators)
-  t = t.replace(/\r\n/g, '\n');
-  t = t.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-').trim();
+  // Normalize newlines
+  t = t.replace(/\r\n/g, '\n').trim();
 
   // Identify the earliest "cut" marker that indicates the start of the quoted thread or signature
-  // (Added robust support for "-------- Original message --------" and common variants)
   const markers = [
-    /^\s*On .+ wrote:\s*$/mi,                         // "On Oct 20, 2025, at 6:16 PM, Name <email> wrote:"
-    /^\s*From:\s.*$/mi,                               // "From: Name <email>"
+    /^\s*On .+ wrote:\s*$/mi,     // "On Oct 20, 2025, at 6:16 PM, Name <email> wrote:"
+    /^\s*From:\s.*$/mi,           // "From: Name <email>"
     /^\s*Sent from my iPhone\s*$/mi,
     /^\s*Sent from my iPad\s*$/mi,
-    /^\s*--\s*$/m,                                    // signature delimiter "-- "
-    /^\s*-{2,}\s*Original message\s*-{2,}\s*$/mi,     // "-------- Original message --------" (new)
-    /^\s*-{2,}\s*Forwarded message\s*-{2,}\s*$/mi     // "---------- Forwarded message ----------" (extra safety)
+    /^\s*--\s*$/m                 // signature delimiter "-- "
   ];
 
   let cutIndex = -1;
@@ -872,6 +868,7 @@ function extractCustomerTopText(raw) {
 
   return t;
 }
+
 
 /** Latest inbound (not from SHOP_FROM_EMAIL) message in the thread */
 /** Latest inbound (from customer) message in the thread */
