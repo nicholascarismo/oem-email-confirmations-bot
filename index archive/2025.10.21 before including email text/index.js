@@ -821,55 +821,6 @@ function extractRichMessage(msg) {
   };
 }
 
-// Extract only the customer's free text (above quoted thread / headers / signatures)
-function extractCustomerTopText(raw) {
-  let t = String(raw || '');
-  if (!t) return '';
-
-  // Normalize newlines
-  t = t.replace(/\r\n/g, '\n').trim();
-
-  // Identify the earliest "cut" marker that indicates the start of the quoted thread or signature
-  const markers = [
-    /^\s*On .+ wrote:\s*$/mi,     // "On Oct 20, 2025, at 6:16 PM, Name <email> wrote:"
-    /^\s*From:\s.*$/mi,           // "From: Name <email>"
-    /^\s*Sent from my iPhone\s*$/mi,
-    /^\s*Sent from my iPad\s*$/mi,
-    /^\s*--\s*$/m                 // signature delimiter "-- "
-  ];
-
-  let cutIndex = -1;
-  for (const re of markers) {
-    const m = re.exec(t);
-    if (m && (cutIndex === -1 || m.index < cutIndex)) {
-      cutIndex = m.index;
-    }
-  }
-  if (cutIndex > -1) {
-    t = t.slice(0, cutIndex);
-  }
-
-  // Drop quoted lines (beginning with '>') and obvious signature/image placeholders
-  t = t
-    .split('\n')
-    .filter(line => !/^\s*>/.test(line))
-    .filter(line => !/^\s*(image|signature)[:\s]/i.test(line))
-    .join('\n');
-
-  // Collapse excessive blank lines
-  t = t.replace(/\n{3,}/g, '\n\n').trim();
-
-  // Ignore extremely short fragments (likely noise)
-  const minContent = t.replace(/\s+/g, '');
-  if (minContent.length < 5) return '';
-
-  // Cap to keep Shopify Notes readable
-  if (t.length > 2000) t = t.slice(0, 2000) + '…';
-
-  return t;
-}
-
-
 /** Latest inbound (not from SHOP_FROM_EMAIL) message in the thread */
 /** Latest inbound (from customer) message in the thread */
 async function gmailGetLatestInboundInThread(threadId) {
@@ -1221,7 +1172,7 @@ app.action('good_clear', async ({ ack, body, client, logger }) => {
     const newLine = `Info verified via customer email response on ${date} by ${by}`;
     await prependOrderNote(orderId, newLine);
 
-// --- NEW: also attach any images from the email thread AND capture the customer's free-text message ---
+// --- NEW: also attach any images from the email thread to custom.reference_images ---
 try {
   // We need the subjectGuess from the original button payload (it was stored in the button value)
   let subjectGuess = '';
@@ -1233,51 +1184,22 @@ try {
   // Find the Gmail thread using the same heuristics you use elsewhere
   const foundThread = await gmailFindThread({ subjectGuess, orderName });
   if (foundThread) {
-    // Use the latest inbound (from customer) message as the source
+    // Use the latest inbound (from customer) message as the source of images
     const latestInbound = await gmailGetLatestInboundInThread(foundThread.threadId);
 
-    // 1) Upload images (existing behavior preserved)
-    try {
-      const result = await uploadEmailImagesToOrderMetafield({
-        latestMessage: latestInbound,
-        order
-      });
-      if (result.uploadedCount > 0) {
-        await prependOrderNote(
-          orderId,
-          `Attached ${result.uploadedCount} reference image(s) from customer email to metafield custom.reference_images.`
-        );
-      }
-    } catch (attachErr) {
-      logger?.error?.('reference_images attach failed', attachErr);
-      await client.chat.postMessage({
-        channel, thread_ts,
-        text: `⚠️ Could not attach reference images this time: ${attachErr.message}`
-      });
-      // Non-fatal; continue to text extraction
-    }
+    const result = await uploadEmailImagesToOrderMetafield({
+      latestMessage: latestInbound,
+      order
+    });
 
-    // 2) Extract customer's free-text (above quoted thread/signature) and prepend to Notes
-    try {
-      const freeText = extractCustomerTopText(latestInbound.bodyText || '');
-      if (freeText) {
-        await prependOrderNote(
-          orderId,
-          `Customer message from email:\n${freeText}`
-        );
-      }
-    } catch (textErr) {
-      logger?.error?.('customer free-text extraction failed', textErr);
-      // Silent fail is fine; no Slack noise needed here
+    if (result.uploadedCount > 0) {
+      await prependOrderNote(orderId, `Attached ${result.uploadedCount} reference image(s) from customer email to metafield custom.reference_images.`);
     }
   }
-} catch (outerErr) {
-  logger?.error?.('email processing (images + text) failed', outerErr);
-  await client.chat.postMessage({
-    channel, thread_ts,
-    text: `⚠️ Could not process customer email: ${outerErr.message}`
-  });
-  // Continue; not fatal to the core "good_clear" flow
+} catch (attachErr) {
+  logger?.error?.('reference_images attach failed', attachErr);
+await client.chat.postMessage({ channel, thread_ts, text: `⚠️ Could not attach reference images this time: ${attachErr.message}` });
+  // Non-fatal: we still proceed with the rest of the good_clear flow
 }
 
     const adminUrl = orderAdminUrl(legacyId);
