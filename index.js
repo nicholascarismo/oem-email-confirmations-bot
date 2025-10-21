@@ -826,20 +826,25 @@ function extractCustomerTopText(raw) {
   let t = String(raw || '');
   if (!t) return '';
 
-  // Normalize newlines and Unicode dashes (clients use em/en dashes in separators)
+  // Normalize newlines and Unicode dashes
   t = t.replace(/\r\n/g, '\n');
   t = t.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, '-').trim();
 
-  // Identify the earliest "cut" marker that indicates the start of the quoted thread or signature
-  // (Added robust support for "-------- Original message --------" and common variants)
+  // If the "Original message" or "Forwarded message" divider is glued to the next header,
+  // insert a newline so our markers can catch it.
+  t = t.replace(/(-{2,}\s*Original message\s*-{2,})(?=From:)/gi, '$1\n');
+  t = t.replace(/(-{2,}\s*Forwarded message\s*-{2,})(?=From:)/gi, '$1\n');
+
+  // Find the earliest "cut" marker (start of quoted thread / headers / signature)
+  // NOTE: no "$" at end; we want to match even if more text follows on the same line.
   const markers = [
-    /^\s*On .+ wrote:\s*$/mi,                         // "On Oct 20, 2025, at 6:16 PM, Name <email> wrote:"
-    /^\s*From:\s.*$/mi,                               // "From: Name <email>"
-    /^\s*Sent from my iPhone\s*$/mi,
-    /^\s*Sent from my iPad\s*$/mi,
-    /^\s*--\s*$/m,                                    // signature delimiter "-- "
-    /^\s*-{2,}\s*Original message\s*-{2,}\s*$/mi,     // "-------- Original message --------" (new)
-    /^\s*-{2,}\s*Forwarded message\s*-{2,}\s*$/mi     // "---------- Forwarded message ----------" (extra safety)
+    /^\s*On .+ wrote:/mi,                         // "On Oct 20, 2025, … wrote:"
+    /^\s*-{2,}\s*Original message\s*-{2,}/mi,     // "-------- Original message --------"
+    /^\s*-{2,}\s*Forwarded message\s*-{2,}/mi,    // "---------- Forwarded message ----------"
+    /^\s*From:\s.*$/mi,                           // "From: …"
+    /^\s*Subject:\s.*$/mi,                        // "Subject: …"
+    /^\s*To:\s.*$/mi,                             // "To: …"
+    /^\s*Date:\s.*$/mi                            // "Date: …"
   ];
 
   let cutIndex = -1;
@@ -853,12 +858,18 @@ function extractCustomerTopText(raw) {
     t = t.slice(0, cutIndex);
   }
 
-  // Drop quoted lines (beginning with '>') and obvious signature/image placeholders
-  t = t
-    .split('\n')
-    .filter(line => !/^\s*>/.test(line))
-    .filter(line => !/^\s*(image|signature)[:\s]/i.test(line))
-    .join('\n');
+  // Drop quoted lines (begin with '>') and obvious signature/image placeholders
+  let lines = t.split('\n');
+
+  // Remove common mobile/webmail signatures
+  const sigLine = /^(sent from my|sent via|get outlook for|mail\.ru|yahoo mail for|gmail mobile)/i;
+
+  lines = lines
+    .filter(line => !/^\s*>/.test(line))                        // quoted thread
+    .filter(line => !/^\s*(image|signature)[:\s]/i.test(line))  // placeholders
+    .filter(line => !sigLine.test(line.trim()));                // mobile signatures
+
+  t = lines.join('\n');
 
   // Collapse excessive blank lines
   t = t.replace(/\n{3,}/g, '\n\n').trim();
