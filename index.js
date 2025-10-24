@@ -1256,7 +1256,7 @@ try {
       if (result.uploadedCount > 0) {
         await prependOrderNote(
           orderId,
-          `Attached ${result.uploadedCount} reference image(s) from customer email to metafield custom.reference_images.`
+          `Attached ${result.uploadedCount} reference image(s) from customer email to Reference Pic(s) metafield`
         );
       }
     } catch (attachErr) {
