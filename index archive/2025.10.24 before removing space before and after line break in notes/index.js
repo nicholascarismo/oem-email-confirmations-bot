@@ -245,16 +245,19 @@ function orderAdminUrl(legacyId) {
   return `https://${SHOPIFY_DOMAIN}/admin/orders/${legacyId}`;
 }
 
-/* ✅ Prepend to the Notes box instead of overwriting (no extra blank lines; standardized dash line) */
+/* ✅ Prepend to the Notes box instead of overwriting */
 async function prependOrderNote(orderId, newLine) {
   const noteData = await shopifyGQL(ORDER_NOTE_QUERY_GQL, { id: orderId });
   const existingNote = noteData?.order?.note || '';
-
-  // Exact separator required across apps:
-  const dashLine = '————————————';
-
-  // Only the new line, then the dash line, then the existing note — no blank lines
-  const updatedNote = [newLine, dashLine, existingNote].join('\n');
+  const updatedNote = [
+    newLine,
+    '',
+    '',
+    '--------',
+    '',
+    '',
+    existingNote
+  ].join('\n');
 
   const res = await shopifyGQL(ORDER_UPDATE_GQL, { input: { id: orderId, note: updatedNote } });
   const errs = res?.orderUpdate?.userErrors || [];
