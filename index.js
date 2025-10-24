@@ -1229,7 +1229,7 @@ app.action('good_clear', async ({ ack, body, client, logger }) => {
     // PREPEND to Notes
     const date = new Date().toISOString().slice(0, 10);
     const by = `@${body.user?.username || body.user?.name || 'user'}`;
-    const newLine = `Info verified via customer email response on ${date} by ${by}`;
+    const newLine = `Info verified via customer email response on ${date}`;
     await prependOrderNote(orderId, newLine);
 
 // --- NEW: also attach any images from the email thread AND capture the customer's free-text message ---
