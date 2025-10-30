@@ -1291,25 +1291,6 @@ try {
   // Continue; not fatal to the core "good_clear" flow
 }
 
-    // --- NEW: Create a Trello card "[Order#] Cleared - Remember to Process" ---
-    try {
-      const { listId } = await resolveTrelloIds();
-      const title = `${orderName} Cleared - Remember to Process`;
-      await trelloPOST('/cards', { idList: listId, name: title });
-
-      // Optional: small confirmation in thread
-      await client.chat.postMessage({
-        channel, thread_ts,
-        text: `📝 Trello card created: "${title}"`
-      });
-    } catch (trelloErr) {
-      logger?.error?.('trello card create failed (good_clear)', trelloErr);
-      await client.chat.postMessage({
-        channel, thread_ts,
-        text: `⚠️ Trello card create failed: ${trelloErr.message}`
-      });
-    }
-
     const adminUrl = orderAdminUrl(legacyId);
 
     const oldNotesShown =
