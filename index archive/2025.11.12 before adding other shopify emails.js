@@ -47,42 +47,7 @@ const OAUTH_DISABLED = true;
 ========================= */
 const ORDER_REGEX_SINGLE = /(C#\d{4,5})/i;     // single capture
 const ORDER_REGEX_MULTI  = /C#\d{4,5}/gi;      // global find-all
-/* =========================
-   Expanded subject matcher
-========================= */
-
-/**
- * This regex list replaces the original MUST_CONTAIN_SINGLE_PHRASE
- * and allows the app to respond to multiple subject patterns.
- *
- * Notes:
- *  - Each pattern allows optional "Fwd:" or "Fwd: " prefix.
- *  - Order numbers like "C#4736" or "Order #9999" are wildcarded.
- *  - Dollar amounts in store credit are wildcarded.
- */
-const SUBJECT_PATTERNS = [
-  /^(?:Fwd:\s*)?\[RESPONSE REQUIRED\]\s+Your\s+Carismo\s+Order/i,
-  /^(?:Fwd:\s*)?Your order is confirmed - no further action needed!?$/i,
-  /^(?:Fwd:\s*)?Refund notification$/i,
-  /^(?:Fwd:\s*)?A shipment from order C#\d{3,6} is out for delivery$/i,
-  /^(?:Fwd:\s*)?A shipment from order C#\d{3,6} has been delivered$/i,
-  /^(?:Fwd:\s*)?A shipment from order C#\d{3,6} is on the way$/i,
-  /^(?:Fwd:\s*)?Order confirmed, no further action needed!?$/i,
-  /^(?:Fwd:\s*)?URGENT - COULD NOT PROCESS PAYMENT$/i,
-  /^(?:Fwd:\s*)?Welcome to the Carismo family!?$/i,
-  /^(?:Fwd:\s*)?Did something catch your eye\??$/i,
-  /^(?:Fwd:\s*)?You left items at checkout$/i,
-  /^(?:Fwd:\s*)?You left items in your cart$/i,
-  /^(?:Fwd:\s*)?Your Carismo order is ready for pickup$/i,
-  /^(?:Fwd:\s*)?Your order has been picked up$/i,
-  /^(?:Fwd:\s*)?Carismo \$\d+(?:\.\d{2})?\s+store credit$/i,
-  /^(?:Fwd:\s*)?Order #\d{3,6} has been canceled$/i
-];
-
-/** Backward compatibility alias — keep the same variable name used elsewhere */
-const MUST_CONTAIN_SINGLE_PHRASE = {
-  test: (subjectOrBody) => SUBJECT_PATTERNS.some(re => re.test(subjectOrBody || ''))
-};
+const MUST_CONTAIN_SINGLE_PHRASE = /\[RESPONSE REQUIRED\]\s+Your\s+Carismo\s+Order/i;
 
 function isDailyReminderString(s) {
   const normalized = (s || '').replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, '-'); // normalize hyphens
